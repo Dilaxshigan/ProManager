@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  GUEST
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+  workspaces  Workspace[]
+  invitations Invitation[]
+  integrations Integration[]
+}
+
+model User {
+  id              String        @id @default(uuid())
+  email           String        @unique
+  password        String
+  firstName       String?
+  lastName        String?
+  role            Role          @default(MEMBER)
+  organizationId  String
+  organization    Organization  @relation(fields: [organizationId], references: [id])
+  projects        Project[]     @relation("ProjectMembers")
+  assignedTasks   Task[]        @relation("AssignedTo")
+  createdTasks    Task[]        @relation("CreatedBy")
+  activityLogs    ActivityLog[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model Workspace {
+  id              String       @id @default(uuid())
+  name            String
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  projects        Project[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model Project {
+  id              String    @id @default(uuid())
+  name            String
+  description     String?
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id])
+  members         User[]    @relation("ProjectMembers")
+  tasks           Task[]
+  
+  // External Integration Fields
+  externalSource  String?   // e.g., "JIRA", "TRELLO"
+  externalId      String?   // ID of board/project in external system
+  lastSyncedAt    DateTime?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Task {
+  id          String     @id @default(uuid())
+  title       String
+  description String?
+  status      TaskStatus @default(TODO)
+  priority    Priority   @default(MEDIUM)
+  dueDate     DateTime?
+  projectId   String
+  project     Project    @relation(fields: [projectId], references: [id])
+  assignedToId String?
+  assignedTo   User?      @relation("AssignedTo", fields: [assignedToId], references: [id])
+  createdById String
+  createdBy   User       @relation("CreatedBy", fields: [createdById], references: [id])
+  order       Int        @default(0)
+  
+  // External Sync Fields
+  externalId  String?    // ID in Jira/Trello
+  syncStatus  String     @default("LOCAL") // "LOCAL", "SYNCED", "CONFLICT"
+  
+  // Workflow fields
+  startDate      DateTime?
+  estimatedHours Int?
+  progress       Int        @default(0)
+  notes          String?
+
+  // Review / approval
+  submittedById  String?
+  reviewerName   String?
+  reviewComments String?
+  approvalStatus String?
+
+  // Completion
+  completedDate   DateTime?
+  finalComments   String?
+  totalTimeSpent  Float?
+  clientApproval  Boolean?  @default(false)
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  action    String
+  entity    String   // e.g., "TASK", "PROJECT"
+  entityId  String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  metadata  Json?    // Store specifics like old/new values
+  createdAt DateTime @default(now())
+}
+
+model Invitation {
+  id             String       @id @default(uuid())
+  email          String
+  role           Role         @default(MEMBER)
+  token          String       @unique
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+}
+
+model Integration {
+  id              String       @id @default(uuid())
+  type            String       // "JIRA", "TRELLO", "SLACK"
+  config          Json         // Encrypted API keys, Webhook secrets, etc.
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([organizationId, type])
+}
